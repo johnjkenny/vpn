@@ -102,6 +102,8 @@ class VpnUtils():
 
     def _start_and_enable_vpn_server(self):
         if self.run_cmd(f'systemctl enable --now {self.service}', True, False)[1]:
+            if self.__service == 'client':
+                self.__set_client_dns()
             sleep(1)
             return self.is_service_active()
         self.log.error('Failed to start and enable VPN service')
@@ -122,6 +124,26 @@ class VpnUtils():
                 self.display_state_bad(status[0])
         return status
 
+    def __set_client_dns(self):
+        try:
+            with open('/etc/resolv.conf', 'w') as file:
+                file.write('nameserver 10.8.0.1')
+            return True
+        except Exception:
+            self.log.exception('Failed to set client DNS')
+        return False
+
+    def __revert_client_dns(self):
+        try:
+            with open('/etc/openvpn/bkp.resolv.conf', 'r') as file:
+                data = file.read()
+            with open('/etc/resolv.conf', 'w') as file:
+                file.write(data)
+            return True
+        except Exception:
+            self.log.exception('Failed to revert client DNS')
+        return False
+
     def is_service_active(self):
         return self.run_cmd(f'systemctl is-active {self.service}', True, False)[0].strip() == 'active'
 
@@ -132,6 +154,8 @@ class VpnUtils():
         if self.is_service_active():
             return self.get_service_status(True)[1]
         self.run_cmd(f'systemctl start {self.service}', True, False)
+        if self.__service == 'client':
+            self.__set_client_dns()
         sleep(1)
         return self.get_service_status(True)[1]
 
@@ -139,11 +163,15 @@ class VpnUtils():
         if not self.is_service_active():
             return self.get_service_status(True)[1]
         self.run_cmd(f'systemctl stop {self.service}', True, False)
+        if self.__service == 'client':
+            self.__revert_client_dns()
         sleep(1)
-        return self.get_service_status(True)[1]
+        return not self.is_service_active()
 
     def restart_service(self):
         self.run_cmd(f'systemctl restart {self.service}', True, False)
+        if self.__service == 'client':
+            self.__set_client_dns()
         sleep(1)
         return self.get_service_status(True)[1]
 

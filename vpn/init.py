@@ -5,7 +5,6 @@ from platform import freedesktop_os_release
 from shutil import which
 from json import dump
 
-
 from vpn.vpn_utils import VpnUtils
 from vpn.cert_auth import CertStore
 
@@ -22,38 +21,75 @@ class Init():
         self.__force = force
         self.__bundle_path = ''
         self.__passwd = ''
+        self.__install_cmd = self.__set_install_cmd()
+        if not self.__install_cmd:
+            raise Exception('Unsupported OS or package manager')
 
     def __make_dirs(self):
         try:
             for name in ['/etc/openvpn/certs', '/etc/openvpn/server', '/etc/openvpn/client', '/etc/openvpn/logs']:
                 Path(name).mkdir(parents=True, exist_ok=True)
-            return True
         except Exception:
             self.utils.log.exception('Failed to create directories')
             return False
+        return self.__make_resolve_bkp()
 
-    def __get_install_cmd(self):
+    def __make_resolve_bkp(self):
+        try:
+            with open('/etc/resolv.conf', 'r') as file:
+                data = file.read()
+            with open('/etc/openvpn/bkp.resolv.conf', 'w') as file:
+                file.write(data)
+            return True
+        except Exception:
+            self.utils.log.exception('Failed to create resolve backup')
+            return False
+
+    def __set_install_cmd(self) -> str:
         os_id = freedesktop_os_release().get('ID_LIKE').lower()
         if 'debian' in os_id:
-            return 'apt install -y openvpn'
+            return 'apt install -y '
         if 'rhel' in os_id:
             if which('dnf'):
-                return 'dnf install -y openvpn'
-            elif which('yum'):
-                return 'yum install -y openvpn'
+                return 'dnf install -y '
+            if which('yum'):
+                return 'yum install -y '
             self.utils.log.error(f'Unable to find package manager for RHEL based system: {os_id}')
         else:
             self.utils.log.error(f'Unsupported OS: {os_id}')
         return ''
 
+    def __install_epel_repo(self):
+        if 'dnf' in self.__install_cmd or 'yum' in self.__install_cmd:
+            return self.utils.run_cmd(self.__install_cmd + 'epel-release')[1]
+        return True
+
     def __install_openvpn(self):
-        # ToDO: epel repo is required for RHEL based systems, need to check debian based system requirements
-        cmd = self.__get_install_cmd()
-        if cmd:
-            if self.utils.run_cmd(cmd)[1]:
+        if self.__install_epel_repo():
+            if self.utils.run_cmd(self.__install_cmd + 'openvpn')[1]:
                 return True
-            self.utils.log.error('Failed to install vpn dependencies')
+        self.utils.log.error('Failed to install vpn dependencies')
         return False
+
+    def __install_dnscrypt_proxy(self):
+        if self.utils.run_cmd(self.__install_cmd + 'dnscrypt-proxy')[1]:
+            return self.__set_dnscrypt_proxy_config()
+        self.utils.log.error('Failed to install dnscrypt-proxy')
+        return False
+
+    def __set_dnscrypt_proxy_config(self):
+        try:
+            with open(f'{Path(__file__).parent}/templates/dnscrypt-proxy.toml', 'r') as file:
+                data = file.read()
+            with open('/etc/dnscrypt-proxy/dnscrypt-proxy.toml', 'w') as file:
+                file.write(data)
+        except Exception:
+            self.utils.log.exception('Failed to set dnscrypt-proxy config')
+            return False
+        return self.__start_and_enable_dnscrypt_proxy()
+
+    def __start_and_enable_dnscrypt_proxy(self):
+        return self.utils.run_cmd('systemctl enable --now dnscrypt-proxy')[1]
 
     def __create_ca_serial_handler(self) -> bool:
         """Create the CA serial file. If force is set, delete the file and recreate it
@@ -223,11 +259,12 @@ class Init():
             bool: True if successful, False otherwise
         """
         self.utils = VpnUtils('server')
-        for method in [self.__make_dirs, self.__install_openvpn, self.__create_ca_serial_handler,
-                       self.__create_cert_subject, self.__initialize_cert_authority, self.__enable_ip_forwarding,
-                       self.__set_server_firewall_config, self.utils._start_and_enable_vpn_server]:
+        for method in [self.__make_dirs, self.__install_openvpn, self.__install_dnscrypt_proxy,
+                       self.__create_ca_serial_handler, self.__create_cert_subject, self.__initialize_cert_authority,
+                       self.__enable_ip_forwarding, self.__set_server_firewall_config,
+                       self.utils._start_and_enable_vpn_server]:
             if not method():
-                self.utils.log.error(f'Failed to initialize server: {method.__name__}')
+                self.utils.log.debug(f'Failed to initialize server: {method.__name__}')
                 return False
         return True
 
@@ -243,8 +280,10 @@ class Init():
             self.utils.log.error(f'Bundle not found: {self.__bundle_path}')
             return False
         self.__passwd = self.utils._prompt_for_passwd() if passwd else ''
-        for method in [self.__make_dirs, self.__install_openvpn, self.__load_and_set_client_config,
-                       self.__set_client_firewall_config, self.utils._start_and_enable_vpn_server]:
+        for method in [self.__make_dirs, self.__install_openvpn,
+                       self.__load_and_set_client_config, self.__set_client_firewall_config,
+                       self.utils._start_and_enable_vpn_server]:
             if not method():
+                self.utils.log.debug(f'Failed to initialize client: {method.__name__}')
                 return False
         return True
