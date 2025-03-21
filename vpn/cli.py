@@ -4,29 +4,15 @@ from vpn.arg_parser import ArgParser
 
 
 def parse_parent_args(args: dict):
-    if args.get('init'):
-        return vpn_init(args['init'])
     if args.get('server'):
         return vpn_server(args['server'])
     if args.get('client'):
         return vpn_client(args['client'])
-    if args.get('certs'):
-        return vpn_certs(args['certs'])
     return True
 
 
 def vpn_parent():
     args = ArgParser('VPN Commands', None, {
-        'certs': {
-            'short': 'C',
-            'help': 'Generate client certificates (vpn-certs)',
-            'nargs': REMAINDER
-        },
-        'init': {
-            'short': 'I',
-            'help': 'Initialize VPN server or client (vpn-init)',
-            'nargs': REMAINDER
-        },
         'server': {
             'short': 's',
             'help': 'VPN server commands (vpn-server)',
@@ -43,51 +29,6 @@ def vpn_parent():
     exit(0)
 
 
-def parse_init_args(args: dict):
-    from vpn.init import Init
-    if args.get('server'):
-        return Init(args['force'])._run_server_init()
-    if args.get('client'):
-        return Init(args['force'])._run_client_init()
-    return True
-
-
-def vpn_init(parent_args: list = None):
-    # ToDo: implement a generic password for client cert gen encryption is password is provided during server init
-    args = ArgParser('VPN Initialization', parent_args, {
-        'server': {
-            'short': 's',
-            'help': 'Run server initialization',
-            'action': 'store_true',
-        },
-        'client': {
-            'short': 'c',
-            'help': 'Run client initialization',
-            'action': 'store_true',
-        },
-        'ip': {
-            'short': 'i',
-            'help': 'IP to use for server or client',
-        },
-        'port': {
-            'short': 'p',
-            'help': 'Port to use for server or client',
-        },
-        'password': {
-            'short': 'P',
-            'help': 'Password to use for client certificate decryption',
-        },
-        'force': {
-            'short': 'F',
-            'help': 'Force action',
-            'action': 'store_true',
-        }
-    }).set_arguments()
-    if not parse_init_args(args):
-        exit(1)
-    exit(0)
-
-
 def parse_server_args(args: dict):
     from vpn.vpn_utils import VpnServer
     if args.get('start'):
@@ -98,6 +39,15 @@ def parse_server_args(args: dict):
         return VpnServer().restart_service()
     if args.get('status'):
         return VpnServer().get_service_status(True)[1]
+    if args.get('enable'):
+        return VpnServer().enable_service()
+    if args.get('disable'):
+        return VpnServer().disable_service()
+    if args.get('certs'):
+        return vpn_certs(args['certs'])
+    if args.get('init'):
+        from vpn.init import Init
+        return Init(args['port'], args['force']).run_server_init()
     return True
 
 
@@ -132,7 +82,28 @@ def vpn_server(parent_args: list = None):
             'short': 'd',
             'help': 'disable server service',
             'action': 'store_true'
-        }
+        },
+        'init': {
+            'short': 'I',
+            'help': 'initialize server service',
+            'action': 'store_true'
+        },
+        'port': {
+            'short': 'p',
+            'help': 'Port to use for service init. Default is 1194',
+            'type': int,
+            'default': 1194,
+        },
+        'force': {
+            'short': 'F',
+            'help': 'Force action',
+            'action': 'store_true',
+        },
+        'certs': {
+            'short': 'c',
+            'help': 'Generate client certificates (vpn-certs)',
+            'nargs': REMAINDER
+        },
     }).set_arguments()
     if not parse_server_args(args):
         exit(1)
@@ -149,6 +120,16 @@ def parse_client_args(args: dict):
         return VpnClient().restart_service()
     if args.get('status'):
         return VpnClient().get_service_status(True)[1]
+    if args.get('enable'):
+        return VpnClient().enable_service()
+    if args.get('disable'):
+        return VpnClient().disable_service()
+    if args.get('init'):
+        from vpn.init import Init
+        if not args.get('certs'):
+            print('Missing client certificates')
+            return False
+        return Init(force=args['force']).run_client_init(args['certs'], args['password'])
     return True
 
 
@@ -183,6 +164,25 @@ def vpn_client(parent_args: list = None):
             'short': 'd',
             'help': 'disable client service',
             'action': 'store_true'
+        },
+        'init': {
+            'short': 'I',
+            'help': 'initialize client service',
+            'action': 'store_true'
+        },
+        'certs': {
+            'short': 'c',
+            'help': 'Client init certificates (.bundle). Provide full path to bundle file',
+        },
+        'password': {
+            'short': 'p',
+            'help': 'Password used during cert creation for decryption. Omit to use default cipher',
+            'action': 'store_true',
+        },
+        'force': {
+            'short': 'F',
+            'help': 'Force action',
+            'action': 'store_true',
         }
     }).set_arguments()
     if not parse_client_args(args):
@@ -191,15 +191,11 @@ def vpn_client(parent_args: list = None):
 
 
 def parse_cert_args(args: dict):
-    # ToDo: add handling to encrypt client certificate bundle
-    from pathlib import Path
     from vpn.vpn_utils import VpnServer
     if args.get('name'):
-        cert_auth = VpnServer().certs
-        if Path(cert_auth.serial_file).exists():
-            return cert_auth.create(args['name'], server=False)
-        cert_auth.log('CA serial file does not exist. Certs can only be generated on VPN server')
-        return False
+        return VpnServer().create_and_bundle_client_certs(args['name'], args['password'], args['force'])
+    if args.get('delete'):
+        return VpnServer().delete_client_cert(args['delete'])
     return True
 
 
@@ -210,8 +206,18 @@ def vpn_certs(parent_args: list = None):
             'help': 'Name of client system',
         },
         'password': {
-            'short': 'P',
-            'help': 'Password to encrypt client certificate bundle. Omit if no encryption is desired',
+            'short': 'p',
+            'help': 'Password to encrypt cert bundle. Omit to use default encryption',
+            'action': 'store_true',
+        },
+        'delete': {
+            'short': 'd',
+            'help': 'Delete client certificate bundle',
+        },
+        'force': {
+            'short': 'F',
+            'help': 'Force action',
+            'action': 'store_true',
         }
     }).set_arguments()
     if not parse_cert_args(args):

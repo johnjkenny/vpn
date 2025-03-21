@@ -1,6 +1,3 @@
-from pwd import getpwnam
-from grp import getgrnam
-from os import chown
 from socket import gethostname
 from pathlib import Path
 from os import remove
@@ -8,19 +5,23 @@ from platform import freedesktop_os_release
 from shutil import which
 from json import dump
 
+
 from vpn.vpn_utils import VpnUtils
 from vpn.cert_auth import CertStore
 
 
 class Init():
-    def __init__(self, force: bool = False):
+    def __init__(self, port: int | str = 1194, force: bool = False):
         """Initialize the web server environment
 
         Args:
             force (bool, optional): Option to recreate env objects. Defaults to False.
         """
         self.utils: VpnUtils | None = None
+        self.__port = port
         self.__force = force
+        self.__bundle_path = ''
+        self.__passwd = ''
 
     def __make_dirs(self):
         try:
@@ -53,18 +54,6 @@ class Init():
                 return True
             self.utils.log.error('Failed to install vpn dependencies')
         return False
-
-    '''
-    def __create_keys(self) -> bool:
-        """Create the encryption keys. Will override the keys if force is set
-
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        if self.__force or not Path(self.utils.encrypt.key_file).exists():
-            return self.utils.encrypt._create_key()
-        return True
-    '''
 
     def __create_ca_serial_handler(self) -> bool:
         """Create the CA serial file. If force is set, delete the file and recreate it
@@ -127,7 +116,7 @@ class Init():
                 return True
         return False
 
-    def __generate_tls_crypt_file(self, file_name='tls-crypt'):
+    def __generate_tls_crypt_file(self):
         """Generate a TLS crypt file. This file is used to encrypt control channel packets.
 
         Args:
@@ -136,7 +125,7 @@ class Init():
         Returns:
             bool: True if successful, False otherwise
         """
-        if self.utils.run_cmd(f'/usr/sbin/openvpn --genkey secret /etc/openvpn/certs/{file_name}.key')[1]:
+        if self.utils.run_cmd('/usr/sbin/openvpn --genkey secret /etc/openvpn/certs/tls-crypt.key')[1]:
             return True
         self.utils.log.error('Failed to generate TLS crypt file')
         return False
@@ -146,55 +135,16 @@ class Init():
             cert_dir = '/etc/openvpn/certs'
             with open(f'{Path(__file__).parent}/templates/server.conf', 'r') as file:
                 data = file.read()
+                data = data.replace('<PORT>', str(self.__port))
                 data = data.replace('<CA>', f'{cert_dir}/vpn-ca.crt')
                 data = data.replace('<CERT>', f'{cert_dir}/{server_name}.crt')
                 data = data.replace('<KEY>', f'{cert_dir}/{server_name}.key')
-                data = data.replace('<DH>', f'{cert_dir}/dh.pem')
-                data = data.replace('<TLS-CRYPT>', f'{cert_dir}/tls-crypt.key')
                 with open('/etc/openvpn/server/service.conf', 'w') as file:
                     file.write(data)
         except Exception:
             self.utils.log.exception('Failed to set server config')
             return False
-        return self.__set_openvpn_owner_and_permissions()
-
-    def __set_openvpn_owner_and_permissions(self):
-        try:
-            path = Path('/etc/openvpn')
-            uid = getpwnam('root').pw_uid
-            gid = getgrnam('openvpn').gr_gid
-            chown(path, uid, gid)
-            path.chmod(0o660)
-        except Exception:
-            self.utils.log.exception('Failed to set server directory owner and permissions')
-            return False
-        return self.__set_cert_owner_and_permissions()
-
-    def __set_cert_owner_and_permissions(self):
-        try:
-            path = Path('/etc/openvpn/certs')
-            uid = getpwnam('root').pw_uid
-            gid = getgrnam('root').gr_gid
-            for item in path.rglob("*"):
-                chown(item, uid, gid)
-                item.chmod(0o600)
-            return True
-        except Exception:
-            self.utils.log.exception('Failed to set server certs owner and permissions')
-        return False
-
-    """
-    def __set_server_firewall_rules(self):
-        self.log.info('Setting VPN server firewall rules')
-        for cmd in ['firewall-cmd --permanent --add-service=openvpn',
-                    'firewall-cmd --permanent --add-masquerade',
-                    'firewall-cmd --reload']:
-            if not self.tools.run_cmd(cmd)[1]:
-                self.log.error('Failed to set server firewall rules')
-                return False
-        self.log.debug('Successfully set server firewall rules')
-        return True
-    """
+        return self.utils._set_openvpn_owner_and_permissions()
 
     def __enable_ip_forwarding(self):
         try:
@@ -210,7 +160,63 @@ class Init():
             return False
         return self.utils.run_cmd('sysctl -p')[1]
 
-    def _run_server_init(self) -> bool:
+    def __set_server_firewall_config(self):
+        if self.utils.is_firewalld_active():
+            for cmd in [f'firewall-cmd --permanent --add-port={self.__port}/udp',
+                        'firewall-cmd --permanent --add-masquerade',
+                        'firewall-cmd --permanent --zone=trusted --add-interface=tun0',
+                        'firewall-cmd --permanent --add-forward-port=port=53:proto=udp:toaddr=10.8.0.1',
+                        'firewall-cmd --reload']:
+                if not self.utils.run_cmd(cmd)[1]:
+                    self.utils.log.error(f'Failed to configure firewall rules: {cmd}')
+                    return False
+            return True
+        self.utils.log.info('Firewalld is not active. Skipping firewall configuration. Add manually for your system')
+        return False
+
+    def __set_client_firewall_config(self):
+        if self.utils.is_firewalld_active():
+            for cmd in [f'firewall-cmd --permanent --add-port={self.__port}/udp', 'firewall-cmd --reload']:
+                if not self.utils.run_cmd(cmd)[1]:
+                    self.utils.log.error(f'Failed to configure firewall rules: {cmd}')
+                    return False
+            return True
+        self.utils.log.info('Firewalld is not active. Skipping firewall configuration. Add manually for your system')
+        return False
+
+    def __get_client_bundle_data(self) -> dict:
+        try:
+            with open(self.__bundle_path, 'rb') as file:
+                data = file.read()
+        except Exception:
+            self.utils.log.exception(f'Failed to read bundle: {self.__bundle_path}')
+            return {}
+        return self.utils._decrypt_bundle(data, self.__passwd)
+
+    def __set_client_config(self, data: dict):
+        for key, value in data.items():
+            if key == 'port':
+                self.__port = value
+                continue
+            elif key == 'config':
+                config_file = '/etc/openvpn/client/service.conf'
+            else:
+                config_file = f'/etc/openvpn/certs/{key}'
+            try:
+                with open(config_file, 'w') as file:
+                    file.write(value)
+            except Exception:
+                self.utils.log.exception(f'Failed to set config: {key}')
+                return False
+        return True
+
+    def __load_and_set_client_config(self):
+        data = self.__get_client_bundle_data()
+        if data:
+            return self.__set_client_config(data) and self.utils._set_openvpn_owner_and_permissions()
+        return False
+
+    def run_server_init(self) -> bool:
         """Run the server initialization process
 
         Returns:
@@ -219,37 +225,26 @@ class Init():
         self.utils = VpnUtils('server')
         for method in [self.__make_dirs, self.__install_openvpn, self.__create_ca_serial_handler,
                        self.__create_cert_subject, self.__initialize_cert_authority, self.__enable_ip_forwarding,
-                       self.utils._start_and_enable_vpn_server]:
+                       self.__set_server_firewall_config, self.utils._start_and_enable_vpn_server]:
             if not method():
                 self.utils.log.error(f'Failed to initialize server: {method.__name__}')
                 return False
         return True
 
-    def _run_client_init(self):
+    def run_client_init(self, bundle_path: str, passwd: bool = False):
         """Run the client initialization process
 
         Returns:
             bool: True if successful, False otherwise
         """
         self.utils = VpnUtils('client')
-        for method in [self.__make_dirs, self.__install_openvpn]:
+        self.__bundle_path = bundle_path
+        if not Path(self.__bundle_path).exists():
+            self.utils.log.error(f'Bundle not found: {self.__bundle_path}')
+            return False
+        self.__passwd = self.utils._prompt_for_passwd() if passwd else ''
+        for method in [self.__make_dirs, self.__install_openvpn, self.__load_and_set_client_config,
+                       self.__set_client_firewall_config, self.utils._start_and_enable_vpn_server]:
             if not method():
-                self.utils.log.error(f'Failed to initialize client: {method.__name__}')
                 return False
         return True
-
-
-# ToDo: set dir permissions so all new files get the same permissions under /etc/openvpn/certs
-# ToDO: enable firewall or iptables rules for server and client
-'''
-firewall-cmd --permanent --add-service=openvpn
-firewall-cmd --permanent --add-masquerade
-firewall-cmd --reload
-- or -
-iptables -A INPUT -p udp --dport 1194 -j ACCEPT
-iptables -A FORWARD -i tun0 -o eth0 -j ACCEPT
-iptables -A FORWARD -i eth0 -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT
-iptables-save > /etc/sysconfig/iptables
-'''
-
-# ToDO: add client config and cert bundle handling

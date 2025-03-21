@@ -9,7 +9,6 @@ try:
         package_data={'vpn': []},
         entry_points={'console_scripts': [
             'vpn = vpn.cli:vpn_parent',
-            'vpn-init = vpn.cli:vpn_init',
             'vpn-server = vpn.cli:vpn_server',
             'vpn-client = vpn.cli:vpn_client',
             'vpn-certs = vpn.cli:vpn_certs',
