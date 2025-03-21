@@ -1,0 +1,61 @@
+server_names = ['cloudflare', 'google', 'quad9']
+listen_addresses = ['10.8.0.1:53']
+max_clients = 250
+ipv4_servers = true
+ipv6_servers = false
+dnscrypt_servers = true
+doh_servers = true
+odoh_servers = false
+require_dnssec = false
+require_nolog = true
+require_nofilter = true
+disabled_server_names = []
+force_tcp = false
+timeout = 5000
+keepalive = 30
+use_syslog = true
+cert_refresh_delay = 240
+# dnscrypt_ephemeral_keys = false
+# tls_disable_session_tickets = false
+# tls_cipher_suite = [52392, 49199]
+bootstrap_resolvers = ['9.9.9.9:53', '8.8.8.8:53']
+ignore_system_dns = true
+netprobe_timeout = 60
+netprobe_address = '9.9.9.9:53'
+# offline_mode = false
+# query_meta = ['key1:value1', 'key2:value2', 'token:MySecretToken']
+log_files_max_age = 7
+log_files_max_backups = 1
+block_ipv6 = false
+block_unqualified = true
+block_undelegated = true
+reject_ttl = 10
+# forwarding_rules = '/etc/dnscrypt-proxy/forwarding-rules.txt'
+# cloaking_rules = '/etc/dnscrypt-proxy/cloaking-rules.txt'
+# cloak_ttl = 600
+cache = true
+cache_size = 4096
+cache_min_ttl = 2400
+cache_max_ttl = 86400
+cache_neg_min_ttl = 60
+cache_neg_max_ttl = 600
+[broken_implementations]
+fragments_blocked = ['cisco', 'cisco-ipv6', 'cisco-familyshield', 'cisco-familyshield-ipv6', 'cleanbrowsing-adult', 'cleanbrowsing-adult-ipv6', 'cleanbrowsing-family', 'cleanbrowsing-family-ipv6', 'cleanbrowsing-security', 'cleanbrowsing-security-ipv6']
+[anonymized_dns]
+skip_incompatible = false
+[sources]
+  [sources.'public-resolvers']
+    urls = ['https://raw.githubusercontent.com/DNSCrypt/dnscrypt-resolvers/master/v3/public-resolvers.md', 'https://download.dnscrypt.info/resolvers-list/v3/public-resolvers.md', 'https://ipv6.download.dnscrypt.info/resolvers-list/v3/public-resolvers.md', 'https://download.dnscrypt.net/resolvers-list/v3/public-resolvers.md']
+    cache_file = '/var/cache/dnscrypt-proxy/public-resolvers.md'
+    minisign_key = 'RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3'
+    refresh_delay = 72
+    prefix = ''
+
+  ## Anonymized DNS relays
+
+  [sources.'relays']
+    urls = ['https://raw.githubusercontent.com/DNSCrypt/dnscrypt-resolvers/master/v3/relays.md', 'https://download.dnscrypt.info/resolvers-list/v3/relays.md', 'https://ipv6.download.dnscrypt.info/resolvers-list/v3/relays.md', 'https://download.dnscrypt.net/resolvers-list/v3/relays.md']
+    cache_file = '/var/cache/dnscrypt-proxy/relays.md'
+    minisign_key = 'RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3'
+    refresh_delay = 72
+    prefix = ''
