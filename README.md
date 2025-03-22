@@ -1,20 +1,43 @@
 # VPN
 
-This project is a simple VPN service that uses OpenVPN to create a secure tunnel between a server and client. The server
-and client are configured to use a TUN interface. The server is configured with a certificate authority to generate
-server, DH key, tls-crypt key and cert and key for every client to add. The client cert bundle includes the vpn-ca.crt,
-tls-crypt.key, client.crt and client.key. The bundle in encrypted with provided password during creation or uses a
-default embedded encryption key. The encryption is added to prevent any package sniffing while transferring the bundle
-to the client. The server is configured to use `dnscrypt-proxy` to encrypt DNS queries and the client is configured to
-use the server as the DNS resolver. All network traffic is routed through the VPN tunnel.
+This project is a simple VPN service that uses OpenVPN to create a secure tunnel between a server and client.
+
+## Server generates the following certs:
+- ca.crt
+- ca.key
+- server.crt
+- server.key
+- dh.pem
+- tls-crypt.key
+- client.crt
+- client.key
+
+The server is configured to run on port 1194 by default, but can be set to a different port during initialization.
+The server is setup to use `dnscrypt-proxy` to encrypt DNS queries and the client is configured to use the server as the
+DNS resolver.
+
+
+## The client cert bundle includes the following:
+- ca.crt
+- tls-crypt.key
+- client.crt
+- client.key
+- client.conf
+
+The client bundle is encrypted with the provided password during creation or uses a default embedded encryption key.
+The encryption is added to prevent any package sniffing while transferring the bundle to the client (man-in-the-middle).
+The certs use ECDSA-SHA256 keys and TLSv1.3 AES-256-GCM-SHA384 cipher for encryption. The client config file includes
+the server IP and port to establish connection with server.
 
 
 ### Limitations:
-This has been tested with `rocky9.5` server and client and most likely will not work with other distribution. Further
-development is needed to make it more portable. Feel free to fork and make it work for your needs or submit a PR.
+This has been tested with `rocky9.5` with server and client and most likely will not work with other distribution.
+Further development will be needed. Feel free to fork and make it work for your needs, submit a PR, or open an issue to
+request a feature. The initialization expects firewalld to be installed and running on the server for proper
+configuration.
 
 
-### Server Installation
+## Server Installation
 
 1. Create virtual Environment
 ```bash
@@ -96,7 +119,7 @@ Enter password:
 
 ### Parent commands:
 ```bash
-vpn -h
+$ vpn -h
 usage: vpn [-h] [-s ...] [-c ...]
 
 VPN Commands
@@ -112,7 +135,7 @@ options:
 
 ### Server Commands:
 ```bash
-vpn -s -h
+$ vpn -s -h
 usage: vpn [-h] [-s] [-st] [-S] [-r] [-e] [-d] [-I] [-p PORT] [-F] [-c ...]
 
 VPN Server
@@ -141,7 +164,7 @@ options:
   -c ..., --certs ...   Generate client certificates (vpn-certs)
 
 
-vpn -s -st
+$ vpn -s -st
 ● openvpn-server@service.service - OpenVPN service for service
      Loaded: loaded (/usr/lib/systemd/system/openvpn-server@.service; enabled; preset: disabled)
      Active: active (running) since Fri 2025-03-21 22:55:34 UTC; 18min ago
@@ -163,7 +186,7 @@ Mar 21 22:55:34 vpn-server systemd[1]: Started OpenVPN service for service.
 
 ### Client Commands:
 ```bash
-vpn -c -h
+$ vpn -c -h
 usage: vpn [-h] [-s] [-st] [-S] [-r] [-e] [-d] [-I] [-c CERTS] [-p] [-F]
 
 VPN Client
@@ -193,7 +216,7 @@ options:
 
   -F, --force           Force action
 
-vpn -c -st
+$ vpn -c -st
 ● openvpn-client@service.service - OpenVPN tunnel for service
      Loaded: loaded (/usr/lib/systemd/system/openvpn-client@.service; enabled; preset: disabled)
      Active: active (running) since Fri 2025-03-21 22:58:18 UTC; 17min ago
@@ -214,7 +237,7 @@ Mar 21 22:58:18 vpn-client systemd[1]: Started OpenVPN tunnel for service.
 
 ### Certs Commands:
 ```bash
-vpn -s -c -h
+$ vpn -s -c -h
 usage: vpn [-h] [-n NAME] [-p] [-d DELETE] [-F]
 
 VPN Client Certs
@@ -242,7 +265,8 @@ A backup of resolve.conf is stored in `/etc/openvpn/bkp.resolv.conf` incase of D
 
 ## dnscrypt-proxy
 
-`dnscrypt-proxy` is installed on the server only. The service is `dnscrypt-proxy.service` and you can use systemctl to
-manage it. The configuration file is located at `/etc/dnscrypt-proxy/dnscrypt-proxy.toml`. The service is enabled by
-default and will start on boot. The client is configured to use the server as the DNS resolver so all DNS queries will
-map to the server then to DoH servers for encrypted DNS resolution.
+- `dnscrypt-proxy` is installed on the server only
+- The service is `dnscrypt-proxy.service` and you can use systemctl to manage it
+- The service is enabled by default and will start on boot
+- The configuration file is located at `/etc/dnscrypt-proxy/dnscrypt-proxy.toml`
+- The client is configured to use the server as DNS resolver
