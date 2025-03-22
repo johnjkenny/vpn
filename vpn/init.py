@@ -1,6 +1,5 @@
 from socket import gethostname
 from pathlib import Path
-from os import remove
 from platform import freedesktop_os_release
 from shutil import which
 from json import dump
@@ -91,26 +90,6 @@ class Init():
     def __start_and_enable_dnscrypt_proxy(self):
         return self.utils.run_cmd('systemctl enable --now dnscrypt-proxy')[1]
 
-    def __create_ca_serial_handler(self) -> bool:
-        """Create the CA serial file. If force is set, delete the file and recreate it
-
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        path = '/etc/openvpn/certs/ca-serial'
-        if not Path(path).exists():
-            try:
-                with open(path, 'w') as file:
-                    file.write('1')
-                return True
-            except Exception:
-                self.utils.log.exception('Failed to create CA serial file')
-                return False
-        if self.__force:
-            remove(path)
-            return self.__create_ca_serial_handler()
-        return True
-
     def __create_cert_subject(self):
         file = Path('/etc/openvpn/certs/ca-subject')
         if file.exists() and not self.__force:
@@ -144,10 +123,9 @@ class Init():
             short_name = host_name.split('.')[0]
             if self.__force or not Path(f'/etc/openvpn/certs/{short_name}.crt').exists():
                 if cert_auth.create(short_name, [short_name, host_name, f'{short_name}.local', 'localhost',
-                                                 '127.0.0.1'], server=True):
+                                                 '127.0.0.1'], is_server=True):
                     return cert_auth.create_dhparam_pem('dh') and \
-                            self.__generate_tls_crypt_file() and \
-                            self.__set_server_config(short_name)
+                        self.__generate_tls_crypt_file() and self.__set_server_config(short_name)
             else:
                 return True
         return False
@@ -260,7 +238,7 @@ class Init():
         """
         self.utils = VpnUtils('server')
         for method in [self.__make_dirs, self.__install_openvpn, self.__install_dnscrypt_proxy,
-                       self.__create_ca_serial_handler, self.__create_cert_subject, self.__initialize_cert_authority,
+                       self.__create_cert_subject, self.__initialize_cert_authority,
                        self.__enable_ip_forwarding, self.__set_server_firewall_config,
                        self.utils._start_and_enable_vpn_server]:
             if not method():

@@ -6,8 +6,8 @@ from json import load
 from cryptography import x509
 from cryptography.x509.oid import NameOID, ExtendedKeyUsageOID
 from cryptography.hazmat.primitives.hashes import SHA256
-from cryptography.hazmat.primitives.asymmetric import rsa, dh
-from cryptography.hazmat.primitives.serialization import Encoding, ParameterFormat, PrivateFormat, NoEncryption, \
+from cryptography.hazmat.primitives.asymmetric import ec, dh
+from cryptography.hazmat.primitives.serialization import Encoding, PrivateFormat, NoEncryption, ParameterFormat, \
     load_pem_private_key
 
 from vpn.logger import get_logger
@@ -23,29 +23,12 @@ class CertStore():
         self.__certificate = None
 
     @property
-    def cert_dir(self):
+    def cert_dir(self) -> str:
         return '/etc/openvpn/certs'
 
     @property
-    def serial_file(self):
-        return f'{self.cert_dir}/ca-serial'
-
-    def __next_serial(self) -> int:
-        """Get the next serial number of the certificate authority
-
-        Returns:
-            int: The next serial number
-        """
-        try:
-            with open(self.serial_file, 'r+') as file:
-                serial = int(file.read().strip()) + 1
-                file.seek(0)
-                file.write(str(serial))
-                file.truncate()
-                return serial
-        except Exception:
-            self.log.exception('Failed to get next serial number from serial cache object')
-        return 0
+    def ca_key(self) -> str:
+        return f'/etc/openvpn/certs/{self.__ca_name}.key'
 
     def __generate_private_key(self) -> bool:
         """Generate private key
@@ -54,7 +37,7 @@ class CertStore():
             bool: True if successful, False otherwise
         """
         try:
-            self.__private_key = rsa.generate_private_key(65537, 4096)
+            self.__private_key = ec.generate_private_key(ec.SECP384R1())
             return True
         except Exception:
             self.log.exception('Failed to generate private key')
@@ -106,56 +89,54 @@ class CertStore():
             self.log.exception('Failed to create subject alternative names')
         return False
 
-    def __define_cert(self, issuer: object, sign_key: bytes, cert_authority: bool = False,
-                      server: bool = False) -> bool:
+    def __define_cert(self, issuer: object, sign_key: bytes, is_ca: bool = False, is_server: bool = False) -> bool:
         """Define certificate
 
         Args:
             issuer (object): The issuer of the certificate.
             sign_key (bytes): The signing key.
-            cert_authority (bool, optional): Determines if the certificate is a CA. Defaults to False.
-            server (bool, optional): Determines if the certificate is for a server. Defaults to False.
+            is_ca (bool, optional): Determines if the certificate is a CA. Defaults to False.
+            is_server (bool, optional): Determines if the certificate is for a server. Defaults to False.
 
         Returns:
             bool: True if successful, False otherwise
         """
-        serial = self.__next_serial()
-        if serial:
-            try:
-                now = datetime.now()
-                self.__certificate = (
-                    x509.CertificateBuilder()
-                    .subject_name(self.__subject)
-                    .issuer_name(issuer)
-                    .public_key(self.__private_key.public_key())
-                    .serial_number(serial)
-                    .not_valid_before(now)
-                    .not_valid_after(now + timedelta(days=36500))  # 100 years
-                    .add_extension(self.__subject_alt_name, False)
-                    .add_extension(x509.KeyUsage(
-                        digital_signature=True,
-                        content_commitment=False,
-                        key_encipherment=False if cert_authority else True,
-                        data_encipherment=False,
-                        key_agreement=False,
-                        key_cert_sign=True if cert_authority else False,
-                        crl_sign=True if cert_authority else False,
-                        encipher_only=False,
-                        decipher_only=False), True)
-                )
-                if cert_authority:
-                    self.__certificate = self.__certificate.add_extension(x509.BasicConstraints(True, None), True)
+        try:
+            now = datetime.now()
+            self.__certificate = (
+                x509.CertificateBuilder()
+                .subject_name(self.__subject)
+                .issuer_name(issuer)
+                .public_key(self.__private_key.public_key())
+                .serial_number(x509.random_serial_number())
+                .not_valid_before(now)
+                .not_valid_after(now + timedelta(days=36500))  # 100 years
+                .add_extension(self.__subject_alt_name, False)
+                .add_extension(x509.KeyUsage(
+                    digital_signature=True,
+                    content_commitment=False,
+                    key_encipherment=is_server,
+                    data_encipherment=False,
+                    key_agreement=not is_ca,
+                    key_cert_sign=is_ca,
+                    crl_sign=is_ca,
+                    encipher_only=False,
+                    decipher_only=False), True)
+            )
+            if is_ca:
+                self.__certificate = self.__certificate.add_extension(
+                    x509.BasicConstraints(True, None), True)
+            else:
+                if is_server:
+                    self.__certificate = self.__certificate.add_extension(
+                        x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), True)
                 else:
-                    if server:
-                        self.__certificate = self.__certificate.add_extension(x509.ExtendedKeyUsage(
-                            [ExtendedKeyUsageOID.SERVER_AUTH]), True)
-                    else:
-                        self.__certificate = self.__certificate.add_extension(
-                            x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]), True)
-                self.__certificate = self.__certificate.sign(sign_key, SHA256())
-                return True
-            except Exception:
-                self.log.exception('Failed to define certificate')
+                    self.__certificate = self.__certificate.add_extension(
+                        x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]), True)
+            self.__certificate = self.__certificate.sign(sign_key, SHA256())
+            return True
+        except Exception:
+            self.log.exception('Failed to define certificate')
         return False
 
     def __save_cert(self, name: str) -> bool:
@@ -219,7 +200,7 @@ class CertStore():
         Returns:
             Certificate object: The CA certificate on success, None otherwise
         """
-        return self.__define_cert(self.__subject, self.__private_key, True)
+        return self.__define_cert(self.__subject, self.__private_key, is_ca=True)
 
     def _initialize_cert_authority(self, force: bool = False) -> bool:
         """Initialize the cluster certificate authority
@@ -255,12 +236,13 @@ class CertStore():
             self.log.exception('Failed to load CA certificate and key')
         return {}
 
-    def create(self, common_name: str, subject_alt: list = None, server: bool = False) -> bool:
+    def create(self, common_name: str, subject_alt: list = None, is_server: bool = False) -> bool:
         """Create a certificate
 
         Args:
             common_name (str): The common name. Name of the service or entity.
             subject_alt (list): The subject alternative names. Defaults to [].
+            is_server (bool, optional): Determines if the certificate is for a server. Defaults to False.
 
         Returns:
             bool: True if successful, False otherwise
@@ -272,7 +254,7 @@ class CertStore():
             return self.__generate_private_key() and \
                 self.__create_subject(common_name) and \
                 self.__create_subject_alternative(subject_alt) and \
-                self.__define_cert(ca.get('cert').subject, ca.get('key'), server=server) and \
+                self.__define_cert(ca.get('cert').subject, ca.get('key'), is_server=is_server) and \
                 self.__save_cert_and_key(common_name)
         return False
 
