@@ -5,8 +5,6 @@ try:
     setup(
         name='vpn',
         version='1.0.0',
-        include_package_data=True,
-        package_data={'vpn': []},
         entry_points={'console_scripts': [
             'vpn = vpn.cli:vpn_parent',
             'vpn-server = vpn.cli:vpn_server',

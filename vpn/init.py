@@ -10,7 +10,7 @@ from vpn.cert_auth import CertStore
 
 class Init():
     def __init__(self, port: int | str = 1194, force: bool = False):
-        """Initialize the web server environment
+        """Initialize the vpn environment
 
         Args:
             force (bool, optional): Option to recreate env objects. Defaults to False.
@@ -24,7 +24,12 @@ class Init():
         if not self.__install_cmd:
             raise Exception('Unsupported OS or package manager')
 
-    def __make_dirs(self):
+    def __make_dirs(self) -> bool:
+        """Create the necessary directories for the vpn environment
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
         try:
             for name in ['/etc/openvpn/certs', '/etc/openvpn/server', '/etc/openvpn/client', '/etc/openvpn/logs']:
                 Path(name).mkdir(parents=True, exist_ok=True)
@@ -33,7 +38,12 @@ class Init():
             return False
         return self.__make_resolve_bkp()
 
-    def __make_resolve_bkp(self):
+    def __make_resolve_bkp(self) -> bool:
+        """Create a backup of the resolve file so it can be restored when vpn service is stopped or DNS issues occur
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
         try:
             with open('/etc/resolv.conf', 'r') as file:
                 data = file.read()
@@ -45,6 +55,11 @@ class Init():
             return False
 
     def __set_install_cmd(self) -> str:
+        """Set the package manager install command based on the OS
+
+        Returns:
+            str: The package manager install command
+        """
         os_id = freedesktop_os_release().get('ID_LIKE').lower()
         if 'debian' in os_id:
             return 'apt install -y '
@@ -58,25 +73,45 @@ class Init():
             self.utils.log.error(f'Unsupported OS: {os_id}')
         return ''
 
-    def __install_epel_repo(self):
+    def __install_epel_repo(self) -> bool:
+        """Install the EPEL repository for RHEL based systems
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
         if 'dnf' in self.__install_cmd or 'yum' in self.__install_cmd:
             return self.utils.run_cmd(self.__install_cmd + 'epel-release')[1]
         return True
 
-    def __install_openvpn(self):
+    def __install_openvpn(self) -> bool:
+        """Install the openvpn package and dependencies
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
         if self.__install_epel_repo():
             if self.utils.run_cmd(self.__install_cmd + 'openvpn')[1]:
                 return True
         self.utils.log.error('Failed to install vpn dependencies')
         return False
 
-    def __install_dnscrypt_proxy(self):
+    def __install_dnscrypt_proxy(self) -> bool:
+        """Install the dnscrypt-proxy package
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
         if self.utils.run_cmd(self.__install_cmd + 'dnscrypt-proxy')[1]:
             return self.__set_dnscrypt_proxy_config()
         self.utils.log.error('Failed to install dnscrypt-proxy')
         return False
 
-    def __set_dnscrypt_proxy_config(self):
+    def __set_dnscrypt_proxy_config(self) -> bool:
+        """Set the dnscrypt-proxy config file
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
         try:
             with open(f'{Path(__file__).parent}/templates/dnscrypt-proxy.toml', 'r') as file:
                 data = file.read()
@@ -87,10 +122,20 @@ class Init():
             return False
         return self.__start_and_enable_dnscrypt_proxy()
 
-    def __start_and_enable_dnscrypt_proxy(self):
+    def __start_and_enable_dnscrypt_proxy(self) -> bool:
+        """Start and enable the dnscrypt-proxy service
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
         return self.utils.run_cmd('systemctl enable --now dnscrypt-proxy')[1]
 
-    def __create_cert_subject(self):
+    def __create_cert_subject(self) -> bool:
+        """Create the CA subject file if it does not exist or force is set
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
         file = Path('/etc/openvpn/certs/ca-subject')
         if file.exists() and not self.__force:
             return True
@@ -111,8 +156,8 @@ class Init():
         return False
 
     def __initialize_cert_authority(self) -> bool:
-        """Initialize the certificate authority by creating the CA cert and key. Then create the localhost cert
-        and key using the CA. If force is set, recreate the CA cert and key
+        """Initialize the certificate authority and create the server certificate, dhparam file and tls-crypt file.
+        Set the server config file.
 
         Returns:
             bool: True if successful, False otherwise
@@ -130,7 +175,7 @@ class Init():
                 return True
         return False
 
-    def __generate_tls_crypt_file(self):
+    def __generate_tls_crypt_file(self) -> bool:
         """Generate a TLS crypt file. This file is used to encrypt control channel packets.
 
         Args:
@@ -144,7 +189,15 @@ class Init():
         self.utils.log.error('Failed to generate TLS crypt file')
         return False
 
-    def __set_server_config(self, server_name: str):
+    def __set_server_config(self, server_name: str) -> bool:
+        """Set the server config file
+
+        Args:
+            server_name (str): The server name
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
         try:
             cert_dir = '/etc/openvpn/certs'
             with open(f'{Path(__file__).parent}/templates/server.conf', 'r') as file:
@@ -160,7 +213,12 @@ class Init():
             return False
         return self.utils._set_openvpn_owner_and_permissions()
 
-    def __enable_ip_forwarding(self):
+    def __enable_ip_forwarding(self) -> bool:
+        """Enable IP forwarding in the sysctl.conf file
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
         try:
             config_file = Path('/etc/sysctl.conf')
             with open(config_file, 'r') as file:
@@ -174,7 +232,12 @@ class Init():
             return False
         return self.utils.run_cmd('sysctl -p')[1]
 
-    def __set_server_firewall_config(self):
+    def __set_server_firewall_config(self) -> bool:
+        """Set the firewall rules for the server
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
         if self.utils.is_firewalld_active():
             for cmd in [f'firewall-cmd --permanent --add-port={self.__port}/udp',
                         'firewall-cmd --permanent --add-masquerade',
@@ -188,7 +251,12 @@ class Init():
         self.utils.log.info('Firewalld is not active. Skipping firewall configuration. Add manually for your system')
         return False
 
-    def __set_client_firewall_config(self):
+    def __set_client_firewall_config(self) -> bool:
+        """Set the firewall rules for the client
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
         if self.utils.is_firewalld_active():
             for cmd in [f'firewall-cmd --permanent --add-port={self.__port}/udp', 'firewall-cmd --reload']:
                 if not self.utils.run_cmd(cmd)[1]:
@@ -199,6 +267,12 @@ class Init():
         return False
 
     def __get_client_bundle_data(self) -> dict:
+        """Get the client bundle data by reading the file in bytes and decrypting the data using the password or
+        default encryption key
+
+        Returns:
+            dict: The client bundle data
+        """
         try:
             with open(self.__bundle_path, 'rb') as file:
                 data = file.read()
@@ -207,7 +281,15 @@ class Init():
             return {}
         return self.utils._decrypt_bundle(data, self.__passwd)
 
-    def __set_client_config(self, data: dict):
+    def __set_client_config(self, data: dict) -> bool:
+        """Set the client config files
+
+        Args:
+            data (dict): The client bundle data
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
         for key, value in data.items():
             if key == 'port':
                 self.__port = value
@@ -224,7 +306,12 @@ class Init():
                 return False
         return True
 
-    def __load_and_set_client_config(self):
+    def __load_and_set_client_config(self) -> bool:
+        """Load the client bundle data and set the client config files
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
         data = self.__get_client_bundle_data()
         if data:
             return self.__set_client_config(data) and self.utils._set_openvpn_owner_and_permissions()
@@ -248,6 +335,10 @@ class Init():
 
     def run_client_init(self, bundle_path: str, passwd: bool = False):
         """Run the client initialization process
+
+        Args:
+            bundle_path (str): The client bundle path
+            passwd (bool, optional): Option to prompt for password. Defaults to False.
 
         Returns:
             bool: True if successful, False otherwise

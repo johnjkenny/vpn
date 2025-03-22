@@ -10,12 +10,15 @@ from cryptography.hazmat.primitives.asymmetric import ec, dh
 from cryptography.hazmat.primitives.serialization import Encoding, PrivateFormat, NoEncryption, ParameterFormat, \
     load_pem_private_key
 
-from vpn.logger import get_logger
-
 
 class CertStore():
-    def __init__(self, logger: Logger = None):
-        self.log = logger or get_logger('vpn')
+    def __init__(self, logger: Logger):
+        """VPN Certificate Authority
+
+        Args:
+            logger (Logger): Logger object
+        """
+        self.log = logger
         self.__ca_name = 'vpn-ca'
         self.__private_key = None
         self.__subject = None
@@ -24,10 +27,20 @@ class CertStore():
 
     @property
     def cert_dir(self) -> str:
+        """Certificate directory
+
+        Returns:
+            str: The certificate directory
+        """
         return '/etc/openvpn/certs'
 
     @property
     def ca_key(self) -> str:
+        """CA key path to check if it exists before creating certs
+
+        Returns:
+            str: The CA key path
+        """
         return f'/etc/openvpn/certs/{self.__ca_name}.key'
 
     def __generate_private_key(self) -> bool:
@@ -44,6 +57,11 @@ class CertStore():
         return False
 
     def __load_cert_subject(self) -> dict:
+        """Load the certificate subject setter
+
+        Returns:
+            dict: The certificate subject
+        """
         try:
             with open(f'{self.cert_dir}/ca-subject', 'r') as file:
                 return load(file)
