@@ -12,7 +12,7 @@ This project is a simple VPN service that uses OpenVPN to create a secure tunnel
 - client.crt
 - client.key
 
-The server is configured to run on port 1194 by default, but can be set to a different port during initialization.
+The server is configured to run on port `1194` by default, but can be set to a different port during initialization.
 The server is setup to use `dnscrypt-proxy` to encrypt DNS queries and the client is configured to use the server as the
 DNS resolver.
 
@@ -26,7 +26,7 @@ DNS resolver.
 
 The client bundle is encrypted with the provided password during creation or uses a default embedded encryption key.
 The encryption is added to prevent any package sniffing while transferring the bundle to the client (man-in-the-middle).
-The certs use ECDSA-SHA256 keys and TLSv1.3 AES-256-GCM-SHA384 cipher for encryption. The client config file includes
+The certs use `ECDSA-SHA256` keys and `TLSv1.3` `AES-256-GCM-SHA384` cipher for encryption. The client config file includes
 the server IP and port to establish connection with server.
 
 
@@ -74,7 +74,7 @@ CA email [myEmail@email.com]:
 
 6. Generate client cert bundle
 ```bash
-# Use --password (-p) flag to set an encryption password on the bundle or omit use default encryption key
+# Use --password (-p) flag to set an encryption password on the bundle or omit to use default encryption key
 vpn --server --certs --name vpn-client --password
 Enter password: 
 [2025-03-21 22:56:24,506][INFO][vpn_utils,267]: Client bundle created: /etc/openvpn/certs/vpn-client.bundle
@@ -256,11 +256,12 @@ options:
 ```
 
 
-VPN logs can be found `/etc/openvpn/logs` on both server and client machines
-VPN server config can be found `/etc/openvpn/server`
-VPN client config can be found `/etc/openvpn/client`
-VPN certs can be found `/etc/openvpn/certs` on both server and client machines
-A backup of resolve.conf is stored in `/etc/openvpn/bkp.resolv.conf` incase of DNS issues
+## Management
+- VPN logs can be found `/etc/openvpn/logs` on both server and client machines
+- VPN server config can be found `/etc/openvpn/server`
+- VPN client config can be found `/etc/openvpn/client`
+- VPN certs can be found `/etc/openvpn/certs` on both server and client machines
+- A backup of resolve.conf is stored in `/etc/openvpn/bkp.resolv.conf` incase of DNS issues
 
 
 ## dnscrypt-proxy
