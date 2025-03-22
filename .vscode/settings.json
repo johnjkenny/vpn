@@ -23,6 +23,7 @@
         "pycache",
         "qdisc",
         "resolv",
+        "SECP",
         "setuptools",
         "toaddr",
         "txqlen",

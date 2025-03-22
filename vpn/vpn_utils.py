@@ -291,11 +291,11 @@ class VpnServer(VpnUtils):
 
     def create_and_bundle_client_certs(self, name: str, passwd: bool = False, force: bool = False) -> bool:
         passwd = self._prompt_for_passwd() if passwd else ''
-        if Path(self.certs.serial_file).exists():
+        if Path(self.certs.ca_key).exists():
             if Path(f'{self.certs.cert_dir}/{name}.crt').exists() and not force:
                 self.log.error(f'Client certificate {name} already exists. Use --force to overwrite')
                 return False
-            if self.certs.create(name, server=False):
+            if self.certs.create(name, is_server=False):
                 return self.__bundle_certs(name, passwd) and self._set_cert_owner_and_permissions()
         else:
             self.log.error('CA serial file does not exist. Either init VPN server or generate certs on server')
